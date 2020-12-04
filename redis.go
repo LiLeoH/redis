@@ -5,13 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"reflect"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/mediocregopher/radix"
+	"golang.org/x/net/proxy"
 )
+
+type Socks5ProxyConfig struct {
+	User string `json:"user"`
+	Pass string `json:"pass"`
+	Addr string `json:"addr"`
+}
 
 // json config example:
 // {
@@ -19,8 +27,9 @@ import (
 // 		{
 // 			"tag": "s1",
 // 			"addr": "127.0.0.1:6379",
-// 			"timeout": 2000
-// 			"pool_size": 20
+// 			"timeout": 2000,
+// 			"pool_size": 20,
+//			"socks5":{"user","u", "pass":"p", "addr":"127.0.0.1:8888"}
 // 		}
 // 	],
 // 	"redis-sentinel": [
@@ -42,10 +51,11 @@ import (
 // }
 //
 type StandaloneConfig struct {
-	Tag      string `json:"tag"`
-	Addr     string `json:"addr"`
-	Timeout  int    `json:"timeout"`
-	PoolSize int    `json:"pool_size"`
+	Tag      string            `json:"tag"`
+	Addr     string            `json:"addr"`
+	Timeout  int               `json:"timeout"`
+	PoolSize int               `json:"pool_size"`
+	Socks5   Socks5ProxyConfig `json:"socks5"`
 }
 
 type SentinelConfig struct {
@@ -53,13 +63,15 @@ type SentinelConfig struct {
 	Addrs     []string          `json:"addrs"`
 	Timeout   int               `json:"timeout"`
 	PoolSize  int               `json:"pool_size"`
+	Socks5    Socks5ProxyConfig `json:"socks5"`
 }
 
 type ClusterConfig struct {
-	Tag      string   `json:"tag"`
-	Addrs    []string `json:"addrs"`
-	Timeout  int      `json:"timeout"`
-	PoolSize int      `json:"pool_size"`
+	Tag      string            `json:"tag"`
+	Addrs    []string          `json:"addrs"`
+	Timeout  int               `json:"timeout"`
+	PoolSize int               `json:"pool_size"`
+	Socks5   Socks5ProxyConfig `json:"socks5"`
 }
 
 type ConfigWrapper struct {
@@ -96,6 +108,18 @@ func InitRedisStandalone(cfg []StandaloneConfig) error {
 		}
 
 		customConnFunc := func(network, addr string) (radix.Conn, error) {
+			if len(c.Socks5.Addr) > 0 {
+				auth := &proxy.Auth{User: c.Socks5.User, Password: c.Socks5.Pass}
+				pd, err := proxy.SOCKS5("tcp", c.Socks5.Addr, auth, nil)
+				if err != nil {
+					panic(err)
+				}
+				dailer := func(addr string) (net.Conn, error) {
+					return pd.Dial("tcp", addr)
+				}
+				conn, err := dailer(addr)
+				return radix.NewConn(conn), err
+			}
 			return radix.Dial(network, addr, radix.DialTimeout(time.Duration(timeout)*time.Millisecond))
 		}
 
@@ -121,6 +145,18 @@ func InitRedisSentinel(cfg []SentinelConfig) error {
 		}
 
 		customConnFunc := func(network, addr string) (radix.Conn, error) {
+			if len(c.Socks5.Addr) > 0 {
+				auth := &proxy.Auth{User: c.Socks5.User, Password: c.Socks5.Pass}
+				pd, err := proxy.SOCKS5("tcp", c.Socks5.Addr, auth, nil)
+				if err != nil {
+					panic(err)
+				}
+				dailer := func(addr string) (net.Conn, error) {
+					return pd.Dial("tcp", addr)
+				}
+				conn, err := dailer(addr)
+				return radix.NewConn(conn), err
+			}
 			return radix.Dial(network, addr, radix.DialTimeout(time.Duration(timeout)*time.Millisecond))
 		}
 
@@ -153,6 +189,18 @@ func InitRedisCluster(cfg []ClusterConfig) error {
 		}
 
 		customConnFunc := func(network, addr string) (radix.Conn, error) {
+			if len(c.Socks5.Addr) > 0 {
+				auth := &proxy.Auth{User: c.Socks5.User, Password: c.Socks5.Pass}
+				pd, err := proxy.SOCKS5("tcp", c.Socks5.Addr, auth, nil)
+				if err != nil {
+					panic(err)
+				}
+				dailer := func(addr string) (net.Conn, error) {
+					return pd.Dial("tcp", addr)
+				}
+				conn, err := dailer(addr)
+				return radix.NewConn(conn), err
+			}
 			return radix.Dial(network, addr, radix.DialTimeout(time.Duration(timeout)*time.Millisecond))
 		}
 
@@ -235,6 +283,10 @@ func getClientByTag(tag string) (radix.Client, error) {
 		return client, err
 	}
 	return nil, fmt.Errorf("Can not find client with tag [%s]", tag)
+}
+
+func GetRadixClient(tag string) (radix.Client, error) {
+	return getClientByTag(tag)
 }
 
 func Do(rcv interface{}, tag, cmd, key string, args ...interface{}) error {
