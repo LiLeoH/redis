@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mediocregopher/radix"
+	"github.com/mediocregopher/radix/v3"
 	"golang.org/x/net/proxy"
 )
 
