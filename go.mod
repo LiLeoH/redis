@@ -1,4 +1,4 @@
-module github.com/lileoh/redis
+module github.com/LiLeoH/redis
 
 go 1.16
 
